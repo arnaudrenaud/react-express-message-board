@@ -3,11 +3,18 @@ const session = require('express-session');
 const bodyParser = require('body-parser');
 const cache = require('memory-cache');
 const passport = require('passport');
+const { check, validationResult } = require('express-validator/check');
 
 require('./authentication-setup');
 const { createMessage, getMessages, seedUsers } = require('./data-interface');
 global.cache = cache;
 seedUsers();
+
+const getErrorAsObject = errors =>
+  errors.reduce((errorObject, { param, msg }) => {
+    errorObject[param] = msg;
+    return errorObject;
+  }, {});
 
 const app = express()
   .use(bodyParser.urlencoded({ extended: true }))
@@ -42,16 +49,31 @@ app
     return res.sendStatus(401);
   })
   .get('/me', (req, res) => res.send(req.user))
-  .post('/messages', (req, res) => {
-    const { content, personalWebsiteURL } = req.body;
-    if (content) {
+  .post(
+    '/messages',
+    [
+      check('content')
+        .not()
+        .isEmpty()
+        .withMessage('Content may not be empty'),
+      check('personalWebsiteURL')
+        .isURL({ require_protocol: true })
+        .withMessage(
+          'URL must be a valid HTTP URL starting with http:// or https://'
+        ),
+    ],
+    (req, res) => {
+      const { content, personalWebsiteURL } = req.body;
+      const errors = validationResult(req).array();
+
+      if (errors.length) {
+        return res.status(400).send({ errors: getErrorAsObject(errors) });
+      }
+
       createMessage(req.user.username, content, personalWebsiteURL);
       return res.status(201).send({ messages: getMessages() });
     }
-    return res
-      .status(400)
-      .send({ errors: { content: 'Content may not be empty' } });
-  });
+  );
 
 app.listen(
   4000,
